@@ -113,7 +113,8 @@ int nbAnalyses;
 
 // === VARIABLES GLOBALES THREADCASES,THREADNETTOYEUR ===
 
-int Min[3] = {0,3,6}, Max[3] = {2,5,8}; // Vecteur qui contient les valeur minimales et maximales des lignes et des colonnes 
+// Vecteur qui contient les valeur minimales et maximales des lignes et des colonnes 
+int MinSquares[3] = {0,3,6}, MaxSquares[3] = {2,5,8}; 
 
 // === VARIABLE GLOBALE POUR LE TRAITEMENT EN COURS ===
 
@@ -188,6 +189,10 @@ int 	RechercheCarre(CASE *);
 void 	TerminaisonCle(void);
 
 
+bool isColonneNotEmpty(CASE *pCase);
+bool isLigneNotEmpty(CASE *pCase);
+
+
 void 	SuppressionColonneFusion(void);
 void 	SuppressionLigneFusion(void);
 void 	SuppressionCarreFusion(void);
@@ -240,7 +245,8 @@ int main(int argc, char* argv[])
 	pthread_mutex_init(&mutexTraitement, NULL);
 	pthread_cond_init(&condTraitement, NULL);
 
-	pthread_key_create(&cle, (void (*)(void *))TerminaisonCle );
+	// Alloue une nouvelle clé TSD ((Thread-Specific Data), qui est enregistrée à l'emplacement pointée par clé
+	pthread_key_create(&cle, (void (*)(void *))TerminaisonCle ); 
 
 	setMessage("Bienvenue sur Blockudoku", true);
 
@@ -321,9 +327,14 @@ int main(int argc, char* argv[])
  */
 void* threadDefileMessage(void)
 {
-  /* ------------------------------------------------------------
-   DECLARATION POUR L'UTILISATION DES SIGNAUX
-   ------------------------------------------------------------ */
+
+  // L'empilement d'un appel à une fonction de terminaison
+  pthread_cleanup_push((void (*) (void *))threadFin, 0);
+
+
+  // === DECLARATION DES VARIABLES DE TRAVAIL ===
+  int positionBuffer;
+
   struct sigaction sigact;
   
   sigact.sa_handler = HandlerSIGALARM;
@@ -334,32 +345,38 @@ void* threadDefileMessage(void)
   sigdelset(&sigact.sa_mask, SIGALRM); // On retire du masquage le signal SIGALRM
   
   sigprocmask(SIG_SETMASK, &sigact.sa_mask, NULL);
-  if ((sigaction(SIGALRM, &sigact, 0))==-1)
+  if ((sigaction(SIGALRM, &sigact, 0)) == -1)
     handle_error( "Erreur : sigaction" );
   
-  
-  
-  // === DECLARATION DES VARIABLES DE TRAVAIL ===
-  int positionBuffer;
+  if(pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, NULL))
+	fprintf(stderr, "ERREUR SETCANCELSTATE : threadDefileMessage\n");
 
- 
+	if(pthread_setcanceltype(PTHREAD_CANCEL_ASYNCHRONOUS, NULL))
+	fprintf(stderr, "ERREUR SETCANCELSTATE : threadDefileMessage\n");
   
-  // L'empilement d'un appel à une fonction de terminaison
-  pthread_cleanup_push((void (*) (void *))threadFin, 0);
+  
   
   mainTimer.tv_sec = 0;
   mainTimer.tv_nsec = 400000000; // 0.4 secondes
   
+  positionBuffer = 0;
 
   // === TRAITEMENT ===
   while(1)
   {
+
+  	pthread_mutex_lock(&mutexMessage);
+
     for(positionBuffer = 0; positionBuffer < TAILLE_BANNER; ++positionBuffer)
     {
   	  DessineLettre(10, positionBuffer + 1, *(message + ((indiceCourant + positionBuffer) % tailleMessage) ));
     }
-    nanosleep(&mainTimer, NULL);
+    
     indiceCourant++;
+
+    pthread_mutex_unlock(&mutexMessage);
+
+    nanosleep(&mainTimer, NULL);
   }
 
   // L'appel de la fonction en fin d'execution du thread n'est pas automatique, il doit être provoqué par l'appel de la fonction dépilement
@@ -369,13 +386,11 @@ void* threadDefileMessage(void)
 }
 
 /*
- * Fonction présent si un thread est arrêté brutalement
- * Param : rien
- * Retour : pointeur générique
+ * @brief Lorsque un thread est arrêté brutalement
  */
 void * threadFin(void)
 {
-	fprintf(stderr, "\n\x1b[33mFin threadDefileMessage : libération du message\x1b[0m");
+	fprintf(stderr, "\n\x1b[32m\x1b[1mFin du threadDefileMessage : Liberation du message\x1b[0m\n");
 	free(message);
 }
 
@@ -386,6 +401,7 @@ void * threadFin(void)
  */
 void * threadPiece(void)
 {
+	// Déclaration des variables de travail
 	int nbRotation = 0, i, j, LMin, CMin;
 	int boolean = 1, boolean2;
 	bool CaseCorrespondante;
@@ -393,30 +409,29 @@ void * threadPiece(void)
 	int p = 0;
 	bool GameOver = false;
 	int C, L;
-	sigset_t mask;
 
-	// --- On masque tous les signaux pour le threadPiece pour être sûr que celui-ci ne reçoit aucun signaux --- //
+	
+
+	// On masque tous les signaux pour le threadPiece 
+	sigset_t mask;
 	sigfillset(&mask);
 	sigprocmask(SIG_SETMASK, &mask, NULL);
 
-	srand(time(NULL));
+	srand((unsigned) time(NULL));
 
 	if(pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, NULL))
-	{
-		fprintf(stderr, "ERREUR SETCANCELSTATE : threadPiece\n");
-	}
+		handle_error("ERREUR SETCANCELSTATE : threadPiece\n");
 
 	if(pthread_setcanceltype(PTHREAD_CANCEL_ASYNCHRONOUS, NULL))
-	{
-		fprintf(stderr, "ERREUR SETCANCELSTATE : threadPiece\n");
-	}
+		handle_error("ERREUR SETCANCELSTATE : threadPiece\n");
+
 
 	while(boolean)
 	{
-		// --- Création de la pièce qui sera affiché dans la zone C + choix d'une couleur aléatoire de la pièce --- //
+		// Création de la pièce qui sera affiché dans la zone C + choix d'une couleur aléatoire de la pièce
 		CreerPiece();
 
-		// --- Rotation aléatoire de cette pièce allant de 0 à 3 --- //
+		// Rotation aléatoire de cette pièce allant de 0 à 3 
 		NbAleatoire = rand() % 4;
 		while(nbRotation < NbAleatoire)
 		{
@@ -433,7 +448,7 @@ void * threadPiece(void)
 			DessineDiamant(pieceEnCours.cases[i].ligne + 3, pieceEnCours.cases[i].colonne + 14, pieceEnCours.couleur);
 		}
 
-		// --- On regarde s'il y a la place disponible pour insérer la pièce --- //
+		// On regarde s'il y a la place disponible pour insérer la pièce 
 		for(i = 0; i < 9; i++) 
 		{
 			for(j = 0; j < 9; j++)
@@ -441,12 +456,12 @@ void * threadPiece(void)
 				if(tab[i][j] == VIDE)
 				{
 					GameOver = false;
-					// --- Valeurs pour la translation de la pièce en cours --- //
+					// Valeurs pour la translation de la pièce en cours 
 					L = i - pieceEnCours.cases[0].ligne;
 					C = j - pieceEnCours.cases[0].colonne;
 					for(p = 0; p < pieceEnCours.nbCases; p++)
 					{
-						// --- Vérification que nous sommes bien dans le cadre du jeu --- //
+						// Vérification que nous sommes bien dans le cadre du jeu 
 						if((pieceEnCours.cases[p].ligne + L < 0 || pieceEnCours.cases[p].ligne + L >= 9) || (pieceEnCours.cases[p].colonne + C < 0 || pieceEnCours.cases[p].colonne + C >= 9))
 						{
 							GameOver = true;
@@ -454,7 +469,7 @@ void * threadPiece(void)
 						}
 						else 
 						{
-							// --- Vérification que la case translatée est vide --- //
+							// Vérification que la case translatée est vide
 							if(tab[pieceEnCours.cases[p].ligne + L][pieceEnCours.cases[p].colonne + C] != VIDE)
 							{
 								GameOver = true;
@@ -462,7 +477,7 @@ void * threadPiece(void)
 							}
 						}
 					}
-					// --- Une place est disponible --- //
+					// Une place est disponible
 					if(!GameOver)
 					{
 						i = 9;
@@ -471,7 +486,7 @@ void * threadPiece(void)
 				}
 			}
 		}
-		// >>> On rentre dans la condition si on ne peut pas insérer la pièce en cours dans le tableau <<< //
+		// On rentre dans la condition si on ne peut pas insérer la pièce en cours dans le tableau <<< //
 		if(GameOver)
 		{
 			fprintf(stderr, "\x1b[31m\x1b[1mGAME OVER\x1b[0m\n");
@@ -488,16 +503,16 @@ void * threadPiece(void)
 		{
 			CaseCorrespondante = true;
 
-			// --- Attend que l'utilisateur insère des diamants égale au nombre de case de la pièce dans la zone C --- //
+			// Attend que l'utilisateur insère des diamants égale au nombre de case de la pièce dans la zone C
 			pthread_mutex_lock(&mutexCasesInserees);
 			while(nbCasesInserees < pieceEnCours.nbCases)
 			{
-				// --- Attend d'être réveillé par le threadEvent --- //
+				// Attend d'être réveillé par le threadEvent 
 				pthread_cond_wait(&condCasesInserees, &mutexCasesInserees);
 			}
 			pthread_mutex_unlock(&mutexCasesInserees);
 
-			// --- Détermination de LMin et CMin de la pièce inséré par l'utilisateur --- //
+			//  Determiner le LMin et CMin de la pièce inséré par l'utilisateur 
 			LMin = casesInserees[0].ligne;
 			CMin = casesInserees[0].colonne;
 			for(i = 1; i < nbCasesInserees; i++)
@@ -528,23 +543,28 @@ void * threadPiece(void)
 			pthread_mutex_unlock(&mutexCasesInserees);
 
 			// --- Vérification de la pièce insérée par l'utilisateur par rapport à la pièce en cours dans la zone C --- //
+			pthread_mutex_lock(&mutexCasesInserees);
 			for(i = 0; i < nbCasesInserees; i++)
 			{
 				if( (casesInserees[i].ligne != pieceEnCours.cases[i].ligne) || (casesInserees[i].colonne != pieceEnCours.cases[i].colonne) )
 				{
 					CaseCorrespondante = false;
 				}
+				
 			}
+			pthread_mutex_unlock(&mutexCasesInserees);
 
-			// >>> On rentre dans la condition si la pièce insérée est la même que la pièce en cours <<< //
+			// On rentre dans la condition si la pièce insérée est la même que la pièce en cours
 			if(CaseCorrespondante)
 			{
-				// --- Dessine la pièce insérée par l'utilisateur en brique bleu --- //
+				// Dessine la pièce insérée par l'utilisateur en brique bleu
+				pthread_mutex_lock(&mutexCasesInserees);
 				for(i = 0; i < nbCasesInserees; i++)
 				{
 					tab[casesInserees[i].ligne + LMin][casesInserees[i].colonne + CMin] = BRIQUE;
 					DessineBrique(casesInserees[i].ligne + LMin, casesInserees[i].colonne + CMin, false);
 				}
+				pthread_mutex_unlock(&mutexCasesInserees);
 
 				// --- Suppression de la pièce dans la zone C --- //
 				for(i = 0; i < pieceEnCours.nbCases; i++)
@@ -572,10 +592,13 @@ void * threadPiece(void)
 				pthread_mutex_unlock(&mutexTraitement);
 
 				// --- Reveille le threadCase avec le signal SIGUSR1 --- //
+
+				pthread_mutex_lock(&mutexCasesInserees);
 				for(i = 0; i < nbCasesInserees; i++)
 				{
 					pthread_kill(tabThreadCase[casesInserees[i].ligne + LMin][casesInserees[i].colonne + CMin], SIGUSR1);
 				}
+				pthread_mutex_unlock(&mutexCasesInserees);
 
 				// --- Attend que le traitement soit effectué afin de pouvoir afficher la nouvelle pièce --- //
 				// --- Attend d'être réveillé par le threadNettoyeur --- //
@@ -590,24 +613,27 @@ void * threadPiece(void)
 			}
 			else
 			{
-				// >>> La pièce insérée n'est PAS la même que la pièce en cours <<< //
-
-				// --- Dessine la pièce insérée par l'utilisateur en brique bleu --- //
+				// La pièce insérée n'est PAS la même que la pièce en cours 
+				// Dessine la pièce insérée par l'utilisateur en brique bleu 
+				pthread_mutex_lock(&mutexCasesInserees);
 				for(i = 0; i < nbCasesInserees; i++)
 				{
 					tab[casesInserees[i].ligne + LMin][casesInserees[i].colonne + CMin] = VIDE;
 					EffaceCarre(casesInserees[i].ligne + LMin, casesInserees[i].colonne + CMin);
 				}
+				pthread_mutex_unlock(&mutexCasesInserees);
 
-				// --- Suppression des lignes et colonnes dans les casesInserees --- //
+				// Suppression des lignes et colonnes dans les casesInserees
+				pthread_mutex_lock(&mutexCasesInserees);
 				for(i = 0; i < nbCasesInserees; i++)
 				{
 					casesInserees[i].ligne = VIDE;
 					casesInserees[i].colonne = VIDE;
 				}
+				pthread_mutex_unlock(&mutexCasesInserees);
 			}
 
-			// --- Protege les variables gobales concernant les cases insérées --- //
+			//  Protege les variables gobales concernant les cases insérées 
 			pthread_mutex_lock(&mutexCasesInserees);
 
 			nbCasesInserees = 0;
@@ -632,16 +658,17 @@ void* threadEvent(void)
   
 
   struct timespec tempsEvent;
+
   unsigned short MainRunning = 1;
   unsigned short i = 0;
   EVENT_GRILLE_SDL event;
   
 
   if(pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, NULL))
-	 fprintf(stderr, "\x1b[31m\x1b[1mERREUR SETCANCELSTATE : threadEvent\x1b[0m\n");
+	 handle_error("\x1b[31m\x1b[1mERREUR SETCANCELSTATE : threadEvent\x1b[0m\n");
 
   if(pthread_setcanceltype(PTHREAD_CANCEL_ASYNCHRONOUS, NULL))
-	 fprintf(stderr, "\x1b[31m\x1b[1mERREUR SETCANCELSTATE : threadEvent\x1b[0m\n");
+	 handle_error("\x1b[31m\x1b[1mERREUR SETCANCELSTATE : threadEvent\x1b[0m\n");
 
   
   while(MainRunning)
@@ -659,6 +686,8 @@ void* threadEvent(void)
         DessineDiamant(event.ligne,event.colonne,ROUGE);
         tab[event.ligne][event.colonne] = DIAMANT;
 
+        fprintf(stderr, "\x1b[1m\x1b[34m Ajouter = (%d, %d)\x1b[0m\n", event.ligne, event.colonne);
+
         // --- Protege les variables gobales concernant les cases insérées --- //
         pthread_mutex_lock(&mutexCasesInserees); // LOCK
 
@@ -669,16 +698,19 @@ void* threadEvent(void)
 
         pthread_mutex_unlock(&mutexCasesInserees); // UNLOCK
 
-        // --- Reveiller le threadPiece
+        // Reveiller le threadPiece
         pthread_cond_signal(&condCasesInserees);
 
       } else {
 
       	DessineVoyant(8, 10, ROUGE);
 
+      	fprintf(stderr, "\x1b[1m\x1b[32m[!] Dormir pour 0,40 secondes\x1b[0m\n");
 		tempsEvent.tv_sec = 0;
 		tempsEvent.tv_nsec = 400000000;
 		nanosleep(&tempsEvent, NULL);
+
+
 
 		if(TraitementEnCours)
 			DessineVoyant(8, 10, BLEU);
@@ -694,17 +726,23 @@ void* threadEvent(void)
     if(event.type == CLIC_DROIT) 
     {
 
-      // --- Suppression de l'affichage + dans la matrice des cases insérées --- //
+      // --- Protege les variables gobales concernant les cases insérées
+      pthread_mutex_lock(&mutexCasesInserees);
+
+      // --- Suppression de l'affichage + dans la matrice des cases insérées
       for(i = 0; i < nbCasesInserees; i++)
       {
         EffaceCarre(casesInserees[i].ligne, casesInserees[i].colonne);
         tab[casesInserees[i].ligne][casesInserees[i].colonne] = VIDE;
+        fprintf(stderr, "\x1b[1m\x1b[31m Suppression = (%d, %d)\x1b[0m\n", casesInserees[i].ligne, casesInserees[i].colonne);
       }
       
-      // --- Protege les variables gobales concernant les cases insérées --- //
+      pthread_mutex_unlock(&mutexCasesInserees);
+
+      // --- Protege les variables gobales concernant les cases insérées
       pthread_mutex_lock(&mutexCasesInserees);
 
-      // --- Suppression des lignes et colonnes dans les casesInserees --- //
+      // --- Suppression des lignes et colonnes dans les casesInserees 
       for(i = 0; i < nbCasesInserees; i++)
       {
         casesInserees[i].ligne = VIDE;
@@ -781,6 +819,8 @@ void * threadScore(void)
 void * threadCases(CASE *pCase)
 {
 	// Déclaration des variables de travail 
+
+	// Renvoie le pointeur vers la zone, ou NULL si cette zone n'existe pas encore. 
 	pthread_setspecific(cle, (CASE *)pCase); // Sauvegarde la case du thread
 
 	struct sigaction sigact;  
@@ -795,10 +835,15 @@ void * threadCases(CASE *pCase)
   	if ((sigaction(SIGUSR1, &sigact, 0)) == -1)
     	handle_error( "Erreur : sigaction" );
 
-
+    // Définit l'état d'annulation du thread appelant à la valeur indiquée par <state>
+    // L'ancien état d'annulation du thread est renvoyé dans le tampon pointé par <oldstate>
+    // On a pas besoin de récupérer l'ancien état d'annulation du thread => NULL
 	if(pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, NULL))
 		fprintf(stderr, "Erreur : SETCANCELSTATE threadEvent\n\n");
 
+
+	// Le thread peut être annulé à tout moment. 
+	// Typiquement, il sera annulé dès réception de la requête d'annulation, mais ce n'est pas garanti par le système.
 	if(pthread_setcanceltype(PTHREAD_CANCEL_ASYNCHRONOUS, NULL))
 		handle_error( "Erreur : SETCANCELSTATE threadEvent\n" );
 
@@ -814,13 +859,12 @@ void * threadCases(CASE *pCase)
 }
 
 /*
- * Fonction qui désalloue la variable usuelle pour chaque threadCase
- * Param : rien
- * Retour : rien
+ * @brief Fonction qui se charge de désallouer la variable usuelle pour chaque threadCase
+
  */
 void TerminaisonCle(void)
 {
-	handle_error( "Erreur : Fin cle" );
+	fprintf(stderr, "\x1b[32m\x1b[1m[!] Terminer cle\x1b[0m\n" );
 }
 
 /*
@@ -833,6 +877,9 @@ void * threadNettoyeur(void)
 	unsigned short nbrCombo = 0;
 	struct timespec tempsNettoyeur;
 	
+	sigset_t mask;
+  	sigfillset(&mask); // On masque l'ensemble des signaux
+  	sigprocmask(SIG_SETMASK, &mask, NULL);
 
 	while(1)
 	{
@@ -845,25 +892,25 @@ void * threadNettoyeur(void)
 		pthread_mutex_unlock(&mutexAnalyse);
 
 		
-		// --- Protection des variables globales concernant l'analyse --- //
+		// Protection des variables globales concernant l'analyse
 		pthread_mutex_lock(&mutexAnalyse);
 
-		/// >>> On entre dans la condition s'il n'y a aucune ligne, colonne et carré complet <<< //
+		/// On entre dans la condition s'il n'y a aucune ligne, colonne et carré complet
 		if(nbLignesCompletes == 0 && nbColonnesCompletes == 0 && nbCarresComplets == 0)
 		{
 			nbAnalyses = 0;
 		}
 		else
 		{
-			/// >>> On entre dans la condition s'il y a au moins une ligne, une colonne et carré complet <<< //
+			/// On entre dans la condition s'il y a au moins une ligne, une colonne et carré complet
 
-			// --- Protection des variables globales concernant le score et les combos --- //
+			// Protection des variables globales concernant le score et les combos
 			pthread_mutex_lock(&mutexScore);
 
-			// --- On additionne toutes les lignes, colonnes et carrés complets ce qui permet de savoir le nombre de combos effectué par l'utilisateur --- //
+			// On additionne toutes les lignes, colonnes et carrés complets ce qui permet de savoir le nombre de combos effectué par l'utilisateur --- //
 			nbrCombo = nbLignesCompletes + nbColonnesCompletes + nbCarresComplets;
 
-			// --- Reçoit plus de points s'il y a eu plusieurs combos en même mainTimer --- //
+			// Reçoit plus de points s'il y a eu plusieurs combos en même mainTimer
 			switch(nbrCombo)
 			{
 				case 1:	
@@ -918,7 +965,7 @@ void * threadNettoyeur(void)
 
 		pthread_mutex_unlock(&mutexAnalyse);
 
-		// --- Protection de la variable globale concernant le traitement 
+		// Protection de la variable globale concernant le traitement 
 		pthread_mutex_lock(&mutexTraitement);
 
 		TraitementEnCours = false;
@@ -939,8 +986,7 @@ void SuppressionColonneFusion()
 
 	int i = 0, j;
 
-	// --- Suppression d'une ou plusieurs colonnes en fusion --- //
-	while(colonnesCompletes[i] != -1)
+	while(colonnesCompletes[i] != -1) // Check le vecteur
 	{
 		for(j = 0; j < 9; j++)
 		{
@@ -989,9 +1035,9 @@ void SuppressionCarreFusion(void)
 	while(carresComplets[i] != -1)
 	{
 
-		for(ligne = Min[carresComplets[i] / 3]; ligne <= Max[carresComplets[i] / 3]; ligne++)
+		for(ligne = MinSquares[carresComplets[i] / 3]; ligne <= MaxSquares[carresComplets[i] / 3]; ligne++)
 		{
-			for(colonne = Min[carresComplets[i] % 3]; colonne <= Max[carresComplets[i] % 3]; colonne++)
+			for(colonne = MinSquares[carresComplets[i] % 3]; colonne <= MaxSquares[carresComplets[i] % 3]; colonne++)
 			{
 				tab[ligne][colonne] = VIDE;
 				EffaceCarre(ligne, colonne);
@@ -1047,9 +1093,9 @@ void TriCases(CASE *vecteur,int indiceDebut,int indiceFin)
 }
 
 /*
- * Fonction qui le numéro du carré en fonction de la position de la case
- * Param : un pointeur de structure de CASE qui est la position de la case actuel
- * Retour : un entier qui correspond au numéro du carré
+ * @brief Fonction qui nous permet de connaitre le numéro du carré en fonction de la position de la case
+ * @param  Un pointeur de structure de CASE qui est la position de la case actuel
+ * #return un entier qui correspond au numéro du carré
  */
 int RechercheCarre(CASE *c)
 {
@@ -1121,7 +1167,7 @@ void setMessage(const char *texte, bool signalOn)
 
 	indiceCourant = 0;
 
-	// --- Concaténation du message avec des espaces --- //
+	// Concaténation du message avec des espaces
 	sprintf(Espace, "     ");
 	strcat(message, Espace);
 
@@ -1131,7 +1177,7 @@ void setMessage(const char *texte, bool signalOn)
 
 	if(signalOn)
 	{
-		alarm(10);
+		alarm(10); // On attend 10secondes
 	}
 }
 
@@ -1193,20 +1239,6 @@ void RotationPiece(PIECE *pPiece)
 
 
 
-
-
-/*
- * ===============================================
- * 	    FIN FONCTION CONCERNANT LA PIECE
- * ===============================================
- */
-
-/*
- * ===============================================
- * 	    		FONCTION HANDLER
- * ===============================================
- */
-
 /**
 * @brief Fonction qui se charge de mofifier l'affichage en : "Jeu en cours"
 */
@@ -1218,35 +1250,75 @@ void HandlerSIGALARM(int signal)
 }
 
 
-/*
- * Handler qui récupére le signal SIGUSR1 et analyse si les lignes , les colonnes et les carrés sont complètes
- * Param : le signal
- * Retour : rien
- */
-void HandlerSIGUSR1(int sig)
+/**
+* Fonction qui permet de vérifier q'une ligne est bien remplie
+*/
+bool isLigneNotEmpty(CASE *pCase)
 {
-	CASE *c;
-	bool LComplete = true, CComplete = true, CarreComplet = true;
-	int i = 0, j = 0;
-	int NumCarre;
+	
+	bool LComplete = true;
+	int i = 0;
 
-	// --- Récupération la case de la cle --- //
-	c = (CASE *) pthread_getspecific(cle);
-
-	// --- Protection des variables globales concernant l'analyse --- //
-	pthread_mutex_lock(&mutexAnalyse);
-
-	// --- Vérification d'une ligne remplie --- //
 	while(LComplete && i < 9)
 	{
-		if(tab[c->ligne][i] == VIDE)
+		if(tab[pCase->ligne][i] == VIDE)
 		{
 			LComplete = false;
 		}
 		i++;
 	}
+	return LComplete;
+}
 
-	// >>> On rentre dans la condition si la ligne est complete <<< //
+
+/**
+* Fonction qui permet de vérifier q'une colonne est bien remplie
+*/
+bool isColonneNotEmpty(CASE *pCase)
+{
+	bool CComplete = true;
+	int i = 0;
+
+	//  Vérification d'une colonne remplie 
+	while(CComplete && i < 9)
+	{
+		if(tab[i][pCase->colonne] == VIDE)
+		{
+			CComplete = false;
+		}
+		i++;
+	}
+
+	return CComplete;
+}
+
+
+
+
+/*
+ * @brief Handler qui se charge de récupérer le signal SIGUSR1 et se charge d'analyser si les lignes, les colonnes et les carrés sont complètes
+ * @param le signal
+ */
+void HandlerSIGUSR1(int sig)
+{
+	// Déclaration des variables de travail
+	CASE *pCase;
+	bool LComplete = true, CComplete = true, CarreComplet = true;
+	int i = 0, j = 0;
+	int NumeroEmplacementSquare;
+
+	// Un thread accède à sa donnée spécifique associé à la clé passée comme paramètre en utilisant la primitive
+	pCase = (CASE *) pthread_getspecific(cle);
+
+	// --- Protection des variables globales concernant l'analyse 
+	pthread_mutex_lock(&mutexAnalyse);
+
+	// ==================================================================
+	// ================ Vérification d'une ligne remplie ================
+	// ==================================================================
+	LComplete = isLigneNotEmpty(pCase);
+
+	// On rentre dans la condition si la ligne est complete
 	if(LComplete)
 	{
 		i = 0;
@@ -1255,133 +1327,123 @@ void HandlerSIGUSR1(int sig)
 		while(lignesCompletes[i] != -1)
 		{
 			// --- Vérifie si la ligne est présente dans le vecteur lignesCompletes --- //
-			if(lignesCompletes[i] == c->ligne)
+			if(lignesCompletes[i] == pCase->ligne)
 			{
 				LComplete = false;
 			}
 			i++;
 		}
 
-		// >>> On entre dans la condition si la ligne n'est pas présente dans le vecteur lignesCompletes <<< //
+		// On entre dans la condition si la ligne n'est pas présente dans le vecteur lignesCompletes <<< //
 		if(LComplete)
 		{
-			lignesCompletes[i] = c->ligne;
+			lignesCompletes[i] = pCase->ligne;
 			nbLignesCompletes++;
 
-			// --- Dessine des briques en fusion pour la ligne qui est complète --- //
+			//  Dessine des briques en fusion pour la ligne qui est complète
 			for(i = 0; i < 9; i++)
 			{
-				DessineBrique(c->ligne, i, true);
+				DessineBrique(pCase->ligne, i, true);
 			}
 		}
 	}
 
-	i = 0;
 
-	// --- Vérification d'une colonne remplie --- //
-	while(CComplete && i < 9)
-	{
-		if(tab[i][c->colonne] == VIDE)
-		{
-			CComplete = false;
-		}
-		i++;
-	}
+	// ==================================================================
+	// =============== Vérification d'une colonne remplie ===============
+	// ==================================================================
+	CComplete = isColonneNotEmpty(pCase);
 
-	// >>> On rentre dans la condition si la colonne est complete <<< //
+	// On rentre dans la condition si la colonne est complete 
 	if(CComplete)
 	{
 		i = 0;
 
-		// --- Rechercher d'une place disponible dans le vecteur colonnesCompletes --- //
+		// Rechercher d'une place disponible dans le vecteur colonnesCompletes 
 		while(colonnesCompletes[i] != -1)
 		{
-			// --- Vérifie si la colonne est présente dans le vecteur colonnesCompletes --- //
-			if(colonnesCompletes[i] == c->colonne)
+			// Vérifie si la colonne est présente dans le vecteur colonnesCompletes 
+			if(colonnesCompletes[i] == pCase->colonne)
 			{
 				CComplete = false;
 			}
 			i++;
 		}
 
-		// >>> On entre dans la condition si la colonne n'est pas présent dans le vecteur colonnesCompletes <<< //
+		// On entre dans la condition si la colonne n'est pas présent dans le vecteur colonnesCompletes 
 		if(CComplete)
 		{
-			colonnesCompletes[i] = c->colonne;
+			colonnesCompletes[i] = pCase->colonne;
 			nbColonnesCompletes++;
 
-			// --- Dessine des briques en fusion pour la colonne qui est complète --- //
+			//  Dessine des briques en fusion pour la colonne qui est complète 
 			for(i = 0; i < 9; i++)
 			{
-				DessineBrique(i, c->colonne, true);
+				DessineBrique(i, pCase->colonne, true);
 			}
 		}
 	}
 
-	NumCarre = RechercheCarre(c);
 
-	// --- Vérification d'un carré rempli --- //
-	for(i = Min[NumCarre / 3]; i <= Max[NumCarre / 3]; i++)
+	// ==================================================================
+	// =============== Vérification d'un carre remplie ===============
+	// ==================================================================
+	NumeroEmplacementSquare = RechercheCarre(pCase);
+
+	// Vérification d'un carré rempli
+	for(i = MinSquares[NumeroEmplacementSquare / 3]; i <= MaxSquares[NumeroEmplacementSquare / 3]; i++)
 	{
-		for(j = Min[NumCarre % 3]; j <= Max[NumCarre % 3]; j++)
+		for(j = MinSquares[NumeroEmplacementSquare % 3]; j <= MaxSquares[NumeroEmplacementSquare % 3]; j++)
 		{
 			if(tab[i][j] == VIDE)
 			{
 				CarreComplet = false;
-				j = Max[NumCarre % 3] + 1;
-				i = Max[NumCarre / 3] + 1;
+				j = MaxSquares[NumeroEmplacementSquare % 3] + 1;
+				i = MaxSquares[NumeroEmplacementSquare / 3] + 1;
 			}
 		}
 	}
 
-	// >>> On entre dans la condition si le carré est rempli <<< //
+
+	// On entre dans la condition si le carré est rempli
 	if(CarreComplet)
 	{
 		i = 0;
 
-		// --- Recherche d'une place libre dans le vecteur carresComplets --- //
+		// Recherche d'une place libre dans le vecteur carresComplets
 		while(carresComplets[i] != -1)
 		{
-			// --- Vérifie si le numéro du carré n'est pas déjà présent dans le vecteur --- //
-			if(carresComplets[i] == NumCarre)
+			// Vérifie si le numéro du carré n'est pas déjà présent dans le vecteur
+			if(carresComplets[i] == NumeroEmplacementSquare)
 			{
 				CarreComplet = false;
 			}
 			i++;
 		}
 
-		// >>> On entre dans la condition si le numéro du carré n'est pas présent dans le vecteur <<< //
+		//  On entre dans la condition si le numéro du carré n'est pas présent dans le vecteur 
 		if(CarreComplet)
 		{
-			carresComplets[i] = NumCarre;
+			carresComplets[i] = NumeroEmplacementSquare;
 			nbCarresComplets++;
 
 			// --- Dessine plusieurs briques à l'emplace du numéro du carré --- //
-			for(i = Min[NumCarre / 3]; i <= Max[NumCarre / 3]; i++)
+			for(i = MinSquares[NumeroEmplacementSquare / 3]; i <= MaxSquares[NumeroEmplacementSquare / 3]; i++)
 			{
-				for(j = Min[NumCarre % 3]; j <= Max[NumCarre % 3]; j++)
+				for(j = MinSquares[NumeroEmplacementSquare % 3]; j <= MaxSquares[NumeroEmplacementSquare % 3]; j++)
 				{
 					DessineBrique(i, j, true);
 				}
 			}
 		}
-
 	}
+
 
 	pthread_mutex_unlock(&mutexAnalyse);
 
 	pthread_mutex_lock(&mutexAnalyse);
-	// --- Incrémentation du nombre d'analyse lorsque l'analyse est terminée --- //
-	nbAnalyses++;
-
+	nbAnalyses++; // Incrémentation du nombre d'analyse lorsque l'analyse est terminée 
 	pthread_mutex_unlock(&mutexAnalyse);
 
-	// --- Reveille le threadNettoyeur --- //
-	pthread_cond_signal(&condAnalyse);
+	pthread_cond_signal(&condAnalyse); // Reveille le threadNettoyeur
 }
-
-/*
- * ===============================================
- * 	    	 FIN FONCTION HANDLER
- * ===============================================
- */
