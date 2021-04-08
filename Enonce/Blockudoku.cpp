@@ -116,6 +116,7 @@ int nbAnalyses;
 // Vecteur qui contient les valeur minimales et maximales des lignes et des colonnes 
 int MinSquares[3] = {0,3,6}, MaxSquares[3] = {2,5,8}; 
 
+
 // === VARIABLE GLOBALE POUR LE TRAITEMENT EN COURS ===
 
 bool TraitementEnCours = false;
@@ -186,7 +187,7 @@ void 	CreerPiece(void);
 
 
 int 	RechercheCarre(CASE *);
-void 	TerminaisonCle(void);
+void 	TerminaisonCle(void*data);
 
 
 bool isColonneNotEmpty(CASE *pCase);
@@ -231,7 +232,7 @@ int main(int argc, char* argv[])
 
 	sigset_t mask;
   	sigfillset(&mask); // On masque l'ensemble des signaux
-  	sigprocmask(SIG_SETMASK, &mask, NULL);	
+  	pthread_sigmask(SIG_SETMASK, &mask, NULL);	
 
 
 
@@ -271,6 +272,9 @@ int main(int argc, char* argv[])
 	// Création du threadNettoyeur 
 	pthread_create(&threadHandleNettoyeur, NULL, (void *(*)(void *))threadNettoyeur, NULL);
 
+
+
+	pthread_mutex_lock(&mutexAnalyse); // LOCK
 	// --- Initialisation d'une valeur par défaut pour chaque vecteur pour être sûr de ne pas avoir des valeurs aléatoires --- //
 	for(i = 0; i < NB_CASES; i++)
 	{
@@ -283,6 +287,8 @@ int main(int argc, char* argv[])
 	nbColonnesCompletes = 0;
 	nbCarresComplets = 0;
 	nbAnalyses = 0;
+
+	pthread_mutex_unlock(&mutexAnalyse); // UNLOCK
 
 	DessineVoyant(8, 10, VERT);
 
@@ -344,7 +350,7 @@ void* threadDefileMessage(void)
   sigfillset(&sigact.sa_mask); // On masque l'ensemble des signaux
   sigdelset(&sigact.sa_mask, SIGALRM); // On retire du masquage le signal SIGALRM
   
-  sigprocmask(SIG_SETMASK, &sigact.sa_mask, NULL);
+  pthread_sigmask(SIG_SETMASK, &sigact.sa_mask, NULL);
   if ((sigaction(SIGALRM, &sigact, 0)) == -1)
     handle_error( "Erreur : sigaction" );
   
@@ -415,7 +421,7 @@ void * threadPiece(void)
 	// On masque tous les signaux pour le threadPiece 
 	sigset_t mask;
 	sigfillset(&mask);
-	sigprocmask(SIG_SETMASK, &mask, NULL);
+	pthread_sigmask(SIG_SETMASK, &mask, NULL);
 
 	srand((unsigned) time(NULL));
 
@@ -489,7 +495,7 @@ void * threadPiece(void)
 		// On rentre dans la condition si on ne peut pas insérer la pièce en cours dans le tableau <<< //
 		if(GameOver)
 		{
-			fprintf(stderr, "\x1b[31m\x1b[1mGAME OVER\x1b[0m\n");
+			fprintf(stderr, "\x1b[31m\x1b[1m ====== ==== ===== [ GAME OVER ] ====== ==== =====\x1b[0m\n");
 			setMessage("GAME OVER", false);
 			// --- Annule le signal SIGALRM s'il y a eu un combo avant GAME OVER --- //
 			alarm(0);
@@ -654,7 +660,7 @@ void* threadEvent(void)
   // Déclaration des variables de travail
   sigset_t mask;
   sigfillset(&mask); // On masque l'ensemble des signaux
-  sigprocmask(SIG_SETMASK, &mask, NULL);
+  pthread_sigmask(SIG_SETMASK, &mask, NULL);
   
 
   struct timespec tempsEvent;
@@ -722,7 +728,7 @@ void* threadEvent(void)
     }
 
 
-    // === Supprimer DIAMANT ===
+    // === Supprimer PIECE ===
     if(event.type == CLIC_DROIT) 
     {
 
@@ -758,13 +764,12 @@ void* threadEvent(void)
     // === QUITTER ===
     if(event.type == CROIX) {
       fprintf(stderr, "\x1b[32mVous venez de quitter le jeu !\n\x1b[0m");
-      kill(getpid(), SIGKILL);
       MainRunning = 0;
     }
     
   }
   
-  pthread_exit(NULL);
+  exit(0);
 }
 
 
@@ -777,7 +782,7 @@ void * threadScore(void)
 
 	// --- On masque tous les signaux pour le threadScore pour être sûr que celui-ci ne reçoit aucun signaux --- //
 	sigfillset(&mask);
-	sigprocmask(SIG_SETMASK, &mask, NULL);
+	pthread_sigmask(SIG_SETMASK, &mask, NULL);
 
 	while(1)
 	{
@@ -831,7 +836,7 @@ void * threadCases(CASE *pCase)
     sigdelset(&sigact.sa_mask, SIGUSR1); // On retire du masquage le signal SIGUSR1
 
 
-	sigprocmask(SIG_SETMASK, &sigact.sa_mask, NULL);
+	pthread_sigmask(SIG_SETMASK, &sigact.sa_mask, NULL);
   	if ((sigaction(SIGUSR1, &sigact, 0)) == -1)
     	handle_error( "Erreur : sigaction" );
 
@@ -847,7 +852,7 @@ void * threadCases(CASE *pCase)
 	if(pthread_setcanceltype(PTHREAD_CANCEL_ASYNCHRONOUS, NULL))
 		handle_error( "Erreur : SETCANCELSTATE threadEvent\n" );
 
-	while(1) {
+	while(1) {  // Attend d'être réveillé par le threadPiece au moyen de SIGUSR1
     	pause();
   	} 
 
@@ -862,9 +867,10 @@ void * threadCases(CASE *pCase)
  * @brief Fonction qui se charge de désallouer la variable usuelle pour chaque threadCase
 
  */
-void TerminaisonCle(void)
+void TerminaisonCle(void* data)
 {
-	fprintf(stderr, "\x1b[32m\x1b[1m[!] Terminer cle\x1b[0m\n" );
+	fprintf(stderr, "\x1b[32m\x1b[1m[!] %s sur le thread %lu avec l'argument %p(%d,%d)\x1b[0m\n", __func__, pthread_self(), data, ((CASE*)data)->ligne, ((CASE*)data)->colonne);
+	free(data);
 }
 
 /*
@@ -879,7 +885,7 @@ void * threadNettoyeur(void)
 	
 	sigset_t mask;
   	sigfillset(&mask); // On masque l'ensemble des signaux
-  	sigprocmask(SIG_SETMASK, &mask, NULL);
+  	pthread_sigmask(SIG_SETMASK, &mask, NULL);
 
 	while(1)
 	{
@@ -952,11 +958,10 @@ void * threadNettoyeur(void)
 			tempsNettoyeur.tv_nsec = 0;
 			nanosleep(&tempsNettoyeur, NULL);
 
-			
 			SuppressionColonneFusion();
 			SuppressionLigneFusion();
 			SuppressionCarreFusion();
-
+		
 			nbAnalyses = 0;
 			nbLignesCompletes = 0;
 			nbColonnesCompletes = 0;
@@ -983,7 +988,6 @@ void * threadNettoyeur(void)
 */
 void SuppressionColonneFusion()
 {
-
 	int i = 0, j;
 
 	while(colonnesCompletes[i] != -1) // Check le vecteur
@@ -1006,9 +1010,9 @@ void SuppressionColonneFusion()
 */
 void SuppressionLigneFusion(void)
 {
+
 	int i = 0, j;
 
-	
 	while(lignesCompletes[i] != -1)
 	{
 		for(j = 0; j < 9; j++)
@@ -1019,7 +1023,6 @@ void SuppressionLigneFusion(void)
 		lignesCompletes[i] = -1;
 		i++;
 	}
-
 
 }
 
@@ -1046,7 +1049,6 @@ void SuppressionCarreFusion(void)
 		carresComplets[i] = -1;
 		i++;
 	}
-
 }
 
 /*
@@ -1219,9 +1221,13 @@ void RotationPiece(PIECE *pPiece)
 
   for(indexCase = 0; indexCase < pPiece->nbCases; ++indexCase)
   {
+  	// Rotation de 90 degré
+
     tmp = pPiece->cases[indexCase].ligne; 
     pPiece->cases[indexCase].ligne = (pPiece->cases[indexCase].colonne) * -1;
     pPiece->cases[indexCase].colonne = tmp;
+
+    // Recherche de la plus petite ligne et colonne
 
     if (LMin > pPiece->cases[indexCase].ligne)
       LMin = pPiece->cases[indexCase].ligne;
@@ -1230,6 +1236,7 @@ void RotationPiece(PIECE *pPiece)
       CMin = pPiece->cases[indexCase].colonne;
   }
 
+  // Translation de la pièce pour éviter d'obtenir des valeurs négatives
   for(indexCase = 0; indexCase < pPiece->nbCases; ++indexCase)
   {
     pPiece->cases[indexCase].ligne   = pPiece->cases[indexCase].ligne - LMin;
