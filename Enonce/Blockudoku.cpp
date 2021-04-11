@@ -206,6 +206,8 @@ void HandlerSIGUSR1(int);
 
 struct timespec mainTimer;
 
+///////////////////////////////////////////////////////////////////////////////////////////////////
+///////////////////////////////////////////////////////////////////////////////////////////////////
 
 int main(int argc, char* argv[])
 {
@@ -327,9 +329,8 @@ int main(int argc, char* argv[])
 
 
 /*
- * Fonction thread qui s'occupe de la file de message
- * Param : rien
- * Retour : pointeur générique
+ * @brief Fonction qui s'occupe de la file de message
+ * @return Pointeur générique (void*)
  */
 void* threadDefileMessage(void)
 {
@@ -401,9 +402,8 @@ void * threadFin(void)
 }
 
 /*
- * Fonction thread qui s'occupe de la génération des pièces
- * Param : rien
- * Retour : pointeur générique
+ * @brief Fonction qui s'occupe de la génération des pièces
+ * @return Pointeur générique
  */
 void * threadPiece(void)
 {
@@ -1051,10 +1051,12 @@ void SuppressionCarreFusion(void)
 	}
 }
 
+///////////////////////////////////////////////////////////////////////////////////////////////////
+///////////////////////////////////////////////////////////////////////////////////////////////////
 /*
- * Fonction qui compare deux cases
- * Param : les deux cases en question
- * Retour : un entier
+ * @brief Fonction qui se charge de comparer deux cases
+ * @param Les deux questions en questions
+ * @return Un entier (-1, +1)
  */
 int CompareCases(CASE case1,CASE case2)
 {
@@ -1066,9 +1068,8 @@ int CompareCases(CASE case1,CASE case2)
 }
 
 /*
- * Fonction qui trie les cases contenu dans un vecteur
- * Param : un pointeur de structure de CASE, deux entiers : l'indice de début et l'indice de fin
- * Retour : rien
+ * @brief Fonction qui se charge de trier les cases contenu dans un vecteur
+ * @param Un pointeur de structure de CASE, deux entiers : l'indice de début et l'indice de fin
  */
 void TriCases(CASE *vecteur,int indiceDebut,int indiceFin)
 {
@@ -1094,69 +1095,74 @@ void TriCases(CASE *vecteur,int indiceDebut,int indiceFin)
 	TriCases(vecteur,indiceDebut+1,indiceFin);
 }
 
+///////////////////////////////////////////////////////////////////////////////////////////////////
+///////////////////////////////////////////////////////////////////////////////////////////////////
+
 /*
  * @brief Fonction qui nous permet de connaitre le numéro du carré en fonction de la position de la case
  * @param  Un pointeur de structure de CASE qui est la position de la case actuel
- * #return un entier qui correspond au numéro du carré
+ * @return un entier qui correspond au numéro du carré
  */
 int RechercheCarre(CASE *c)
 {
 	int a = c->ligne / 3;
 
 	switch(c->colonne / 3)
-    	{
-		case 0: 	if(a == 0)
-				{
-					return 0;
-				}
-				if(a == 1)
-				{
-					return 3;
-				}
-				if(a == 2)
-				{
-					return 6;
-				}
+	{
+		case 0: 	
+			if(a == 0)
+			{
+				return 0;
+			}
+			if(a == 1)
+			{
+				return 3;
+			}
+			if(a == 2)
+			{
+				return 6;
+			}
 
-				break;
+			break;
 
-		case 1:	if(a == 0)
-				{
-				  	return 1;
-				}
-				if(a == 1)
-				{
-				  	return 1 + 3;
-				}
-				if(a == 2)
-				{
-				  	return 1 + 6;
-				}
+		case 1:	
+			if(a == 0)
+			{
+			  	return 1;
+			}
+			if(a == 1)
+			{
+			  	return 1 + 3;
+			}
+			if(a == 2)
+			{
+			  	return 1 + 6;
+			}
 
-				break;
+			break;
 
-		case 2:	if(a == 0)
-				{
-				  	return 2;
-				}
-				if(a == 1)
-				{
-				  	return 2 + 3;
-				}
-				if(a == 2)
-				{
-				  	return 2 + 6;
-				}
+		case 2:	
+			if(a == 0)
+			{
+			  	return 2;
+			}
+			if(a == 1)
+			{
+			  	return 2 + 3;
+			}
+			if(a == 2)
+			{
+			  	return 2 + 6;
+			}
 
-				break;
+			break;
     	}
 }
 
 
 /*
- * Fonction qui alloue de l'espace mémoire pour le message et copie son contenu
- * Param : un message et un booléen permettant le SIGALRM 
- * Retour : rien
+ * @brief Fonction qui se charge d'allouer de l'espace mémoire pour le message et copie son contenu
+ * @param Un message et un booléen permettant le SIGALRM 
  */
 void setMessage(const char *texte, bool signalOn)
 {
@@ -1258,7 +1264,7 @@ void HandlerSIGALARM(int signal)
 
 
 /**
-* Fonction qui permet de vérifier q'une ligne est bien remplie
+* @brief Fonction qui permet de vérifier q'une ligne est bien remplie
 */
 bool isLigneNotEmpty(CASE *pCase)
 {
@@ -1279,7 +1285,7 @@ bool isLigneNotEmpty(CASE *pCase)
 
 
 /**
-* Fonction qui permet de vérifier q'une colonne est bien remplie
+* @brief Fonction qui permet de vérifier q'une colonne est bien remplie
 */
 bool isColonneNotEmpty(CASE *pCase)
 {
